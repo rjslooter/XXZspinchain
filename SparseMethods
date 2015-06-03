@@ -1,0 +1,314 @@
+# Calculator for eigenvalues of the Hamiltonian of a quatum spin chain
+# Created by R.J. Slooter (c) 2015
+# Student at Delft University of Technology
+
+import numpy as np
+import scipy
+import scipy.sparse as ssp
+import scipy.sparse.linalg as ssl
+import gc
+
+Jx = 4        # coupling constant x,y direction
+Jz = Jx/8     # coupling constant z direction
+
+Sigx = ssp.csr_matrix([[0.0,1.0],[1.0,0.0]])      # Pauli spin matrix X
+Sigz = ssp.csr_matrix([[1.0,0.0],[0.0,-1.0]])     # Pauli spin matrix Z
+
+Sigz2 = ssp.csr_matrix([[0.25,0.0,0.0,0.0],[0.0,-0.25,0.0,0.0],[0.0,0.0,-0.25,0.0],[0.0,0.0,0.0,0.25]])   # Two atom Z matrix
+SigP = ssp.csr_matrix([[0.0,1.0],[0.0,0.0]])      # Ladder operator +
+SigM = ssp.csr_matrix([[0.0,0.0],[1.0,0.0]])      # Ladder operator -
+
+H2 = 0.5*Jx*(ssp.kron(SigP,SigM,format='csr')+ssp.kron(SigM,SigP,format='csr'))+Jz*Sigz2      # Hamiltonian for two atom chain
+
+MS = 2      # Spin states of the system
+
+#LNew: Length of the new chain, this function builds the basic Hamiltonian for a spin chain.
+def ExpandSparse(LNew):
+    SpId = ssp.identity(MS,format='csr')
+    Sz = MS**LNew     # Hamiltonian dimension size
+    HNew = ssp.csr_matrix((Sz,Sz))
+    Bulk = dict()     # Create a dict to contain the matrices at each atom 
+    for i in range(LNew-1):
+        for j in range(LNew-1):
+            if i == j:
+                Bulk[(i,j)]=H2
+            else:
+                Bulk[(i,j)]=SpId
+    Ha = ssp.csr_matrix((8,8))
+    try:
+        for i in range(LNew-1):
+            for j in range(LNew-2):
+                if j < 1:
+                    Ha = ssp.kron(Bulk[(i,j)],Bulk[(i,j+1)],format='csr')
+                else:
+                    Ha = ssp.kron(Ha,Bulk[(i,j+1)],format='csr')
+            HNew = HNew + Ha    # Step by step construction of the total Hamiltonian
+    except MemoryError:
+        print('The matrix you tried to build requires too much memory space.')    # Matrix can exceed RAM memory
+        return
+    return HNew
+
+#LNew: Length of the new chain, this function creates the magnetic field operator and runs the magnetic field
+# strength between llim and rlim in a specified amount of steps.
+def ExpandSparseM(LNew,steps,llim,rlim):
+    SpId = ssp.identity(MS,format='csr')
+    Eigenvals = np.ndarray(shape=(steps+1,10))
+    if llim > rlim:
+        a = rlim        # Make sure left boundary is left of the right boundary
+        rlim = llim
+        llim = a
+        print('llim > rlim, so llim and rlim were swapped')   
+    B = (rlim-llim)/steps
+    Sz = MS**LNew
+    HNew = ExpandSparse(LNew)   # Create Hamiltonian
+    Bulk = dict()               # Similar creation method for magnetic field operator
+    for i in range(LNew):
+        for j in range(LNew):
+            if i == j:
+                Bulk[(i,j)]=Sigx
+            else:
+                Bulk[(i,j)]=SpId
+    try:
+        Ha = ssp.csr_matrix((4,4))
+        Hb = ssp.csr_matrix((Sz,Sz))
+        for i in range(LNew):
+            for j in range(LNew-1):
+                if j < 1:
+                    Ha = ssp.kron(Bulk[(i,j)],Bulk[(i,j+1)],format='csr')
+                else:
+                    Ha = ssp.kron(Ha,Bulk[(i,j+1)],format='csr')
+            Hb = Hb + Ha
+    except MemoryError:
+        print('Matrix is too large.')
+        return
+    HNew = HNew + (llim-B)*Hb  
+    # One step back to assure we start at the left boundary, notice that the for loop takes a step immediately
+    try:
+        for k in range(steps+1):
+            HNew = HNew + B*Hb
+            # Each time shift magnetic field strength, and in the next line calculate the 10 lowest eigenvalues
+            #hence the `SA` meaning smallest in amplitude
+            w = ssl.eigsh(HNew,10,which = 'SA',return_eigenvectors = False)
+            w = np.sort(w)    # sort eigenvalues smallest first
+            gc.collect()      # Clean up after one step
+            for j in range(10):
+                Eigenvals[k,j] = w[j]
+        Name = 'Heisensav\Valscheck.txt'
+        np.savetxt(Name,Eigenvals,fmt='%1.5f',delimiter='   ')  # Save to txt file
+    except MemoryError:
+        print('The matrix you tried to build requires too much memory space.')
+        return
+    return Eigenvals
+
+#The next function only returns the magnetic field operator corresponding to a chain the length of LNew atoms
+def ExpandSparseMh(LNew):
+    SpId = ssp.identity(MS,format='csr')
+    Sz = MS**LNew
+    Bulk = dict()
+    for i in range(LNew):
+        for j in range(LNew):
+            if i == j:
+                Bulk[(i,j)]=Sigx
+            else:
+                Bulk[(i,j)]=SpId
+    try:
+        Ha = ssp.csr_matrix((4,4))
+        Hb = ssp.csr_matrix((Sz,Sz))
+        for i in range(LNew):
+            for j in range(LNew-1):
+                if j < 1:
+                    Ha = ssp.kron(Bulk[(i,j)],Bulk[(i,j+1)],format='csr')
+                else:
+                    Ha = ssp.kron(Ha,Bulk[(i,j+1)],format='csr')
+            Hb = Hb + Ha
+    except MemoryError:
+        print('Matrix is too large.')
+        return
+    return Hb
+
+#LNew: Length of the new chain, second method the creat Hamiltonian building on Hamiltonians for smaller chains.
+def ExpandSparseNew(LNew):
+    Sz = MS**LNew
+    HNew = ssp.csr_matrix((Sz,Sz))
+    i = 0
+    while i < LNew:
+        try:
+            Amin = LoadSparse(LNew-(i+1))
+            try:
+                for j in range(i+1):
+                    Hc = ssp.csr_matrix((MS**(LNew-i+j),MS**(LNew-i+j)))
+                    Ha = ssp.identity((MS),format='csr')
+                    gc.collect()
+                    Hc = Hc + ssp.kron(Amin,Ha,format='csr')
+                    gc.collect()
+                    Hb = ssp.identity(MS**(LNew-(i+2)+j),format='csr')
+                    gc.collect()
+                    Hc = Hc + ssp.kron(Hb,H2,format='csr')
+                    Amin = Hc
+                    gc.collect()
+                HNew = Hc
+            except MemoryError:
+                print('The matrix you tried to build requires too much memory space.')
+                return
+            i = LNew
+        except FileNotFoundError:
+            i += 1
+    return HNew
+
+#Data: Matrix you want to save. L: length of the chain.
+#WARNING: raises a TypeError
+def SaveSparse(Data,L):
+    try:
+        Filename = 'Heisensav\HMat{0}'.format(L)+'NSxxz'
+        np.savez(Filename,dat = Data.data, ind = Data.indices, ptr = Data.indptr,fmt='%1.3f',delimiter='  ',newline='\n')
+        print('Data is saved.')
+    except TypeError:
+        raise
+    return
+
+def LoadSparse(L):
+    try:
+        loader = np.load('Heisensav\HMat{0}'.format(L)+'NSxxz.npz')
+        return scipy.sparse.csr_matrix((loader['dat'],loader['ind'],loader['ptr']),shape=(MS**L,MS**L))
+    except FileNotFoundError:
+        raise
+        return
+
+def SaveToText(Data,L):
+    try:
+        A = Data.todense()
+        # Save dense matrix
+        Filename = 'Heisensav\HMat{0}'.format(L)+'.txt'
+        np.savetxt(Filename,A,fmt='%1.3f',delimiter='  ',newline='\n')
+        print('Data is saved.')
+    except TypeError:
+        raise
+    return
+
+# Here we calculate for magnetic field, but also return the eigenvectors
+def ExpandSparseMqr(LNew,steps,llim,rlim):
+    SpId = ssp.identity(MS,format='csr')
+    Eigenvals = np.ndarray(shape=(steps+1,10))
+    Eigenvecs = np.zeros((2**LNew,1))
+    if llim > rlim:
+        a = rlim
+        rlim = llim
+        llim = a
+        print('llim > rlim, so llim and rlim were swapped')   
+    B = (rlim-llim)/steps
+    Sz = MS**LNew
+    HNew = LoadSparse(LNew)
+    Bulk = dict()
+    for i in range(LNew):
+        for j in range(LNew):
+            if i == j:
+                Bulk[(i,j)]=Sigx
+            else:
+                Bulk[(i,j)]=SpId
+    try:
+        Ha = ssp.csr_matrix((4,4))
+        Hb = ssp.csr_matrix((Sz,Sz))
+        for i in range(LNew):
+            for j in range(LNew-1):
+                if j < 1:
+                    Ha = ssp.kron(Bulk[(i,j)],Bulk[(i,j+1)],format='csr')
+                else:
+                    Ha = ssp.kron(Ha,Bulk[(i,j+1)],format='csr')
+            Hb = Hb + Ha
+    except MemoryError:
+        print('Matrix is too large.')
+        return
+    HNew = HNew + (llim-B)*Hb
+    try:
+        for k in range(steps+1):
+            HNew = HNew + B*Hb
+            w,v = ssl.eigsh(HNew,10,which = 'SA')
+            w = np.sort(w)
+            gc.collect()
+            for j in range(10):
+                Eigenvals[k,j] = w[j]
+            Eigenvecs = np.hstack((Eigenvecs,v))
+            Eigenvecs = np.hstack((Eigenvecs,np.zeros((2**LNew,1))))
+        Name = 'Heisensav\Valsqr.txt'
+        np.savetxt(Name,Eigenvals,fmt='%1.5f',delimiter='   ')
+        Namev = 'Heisensav\Vecsqr.txt'
+        np.savetxt(Namev,Eigenvecs,fmt='%1.5f',delimiter='   ')
+    except MemoryError:
+        print('The matrix you tried to build requires too much memory space.')
+        return
+    return Eigenvals
+
+# Combining the magnetic field and eigenvector calculation to `interpolate` between known states
+# This gives us a very decent approximation of the real eigenvalues
+def ExpandSparseMint(LNew,steps,substeps,llim,rlim):
+    SpId = ssp.identity(MS,format='csr')
+    Eigenvals = np.zeros(((steps*(substeps+1))+1,10))
+    Eigenvecs = np.zeros((2**LNew,1))
+    if llim > rlim:
+        a = rlim
+        rlim = llim
+        llim = a
+        print('llim > rlim, so llim and rlim were swapped')   
+    B = (rlim-llim)/steps
+    Sz = MS**LNew
+    HNew = LoadSparse(LNew)
+    Bulk = dict()
+    for i in range(LNew):
+        for j in range(LNew):
+            if i == j:
+                Bulk[(i,j)]=Sigx
+            else:
+                Bulk[(i,j)]=SpId
+    try:
+        Ha = ssp.csr_matrix((4,4))
+        Hb = ssp.csr_matrix((Sz,Sz))
+        for i in range(LNew):
+            for j in range(LNew-1):
+                if j < 1:
+                    Ha = ssp.kron(Bulk[(i,j)],Bulk[(i,j+1)],format='csr')
+                else:
+                    Ha = ssp.kron(Ha,Bulk[(i,j+1)],format='csr')
+            Hb = Hb + Ha
+    except MemoryError:
+        print('Matrix is too large.')
+        return
+    HNew2 = HNew + (llim-B)*Hb
+    SubB = B/(substeps+1)
+    HNew3 = HNew + (llim-SubB)*Hb
+    intt = 11
+    try:
+        for k in range(steps+1):
+            HNew2 = HNew2 + B*Hb
+            w,v = ssl.eigsh(HNew2,intt,which = 'SA')
+            w = np.sort(w)
+            gc.collect()
+            for j in range(10):
+                Eigenvals[k*(substeps+1),j] = w[j]
+            Eigenvecs = np.hstack((Eigenvecs,v))
+            Eigenvecs = np.hstack((Eigenvecs,np.zeros((2**LNew,1))))
+        for s in range(steps):
+            ii = s+1
+            jj = s+2
+            V1 = Eigenvecs[:,(ii+(ii-1)*intt):(ii-1+ii*intt)];
+            V2 = Eigenvecs[:,(jj+(jj-1)*intt):(jj-1+jj*intt)];
+            HNew3 = HNew3 + SubB*Hb
+            gc.collect()
+            for l in range(substeps):
+                HNew3 = HNew3 + SubB*Hb
+                A = np.hstack((V1,V2))
+                Q,R = np.linalg.qr(A,mode='reduced')
+                W2 = ssp.csr_matrix(Q)
+                W1 = W2.transpose()
+                W = W1*HNew3*W2
+                n = ssl.eigsh(W,10,which = 'SA',return_eigenvectors = False)
+                n = np.sort(n)
+                for p in range(10):
+                    Eigenvals[(s*substeps)+l+s+1,p] = n[p]
+        Name = 'Heisensav\Valsint122.txt'
+        np.savetxt(Name,Eigenvals,fmt='%1.5f',delimiter='   ')
+        Namev = 'Heisensav\Vecsint.txt'
+        np.savetxt(Namev,Eigenvecs,fmt='%1.5f',delimiter='   ')
+    except MemoryError:
+        print('The matrix you tried to build requires too much memory space.')
+        return
+    return Eigenvals
