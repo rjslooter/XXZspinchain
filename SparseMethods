@@ -227,12 +227,12 @@ def ExpandSparseMqr(LNew,steps,llim,rlim):
             gc.collect()
             for j in range(10):
                 Eigenvals[k,j] = w[j]
-            Eigenvecs = np.hstack((Eigenvecs,v))
-            Eigenvecs = np.hstack((Eigenvecs,np.zeros((2**LNew,1))))
+            Eigenvecs = np.hstack((Eigenvecs,v))                        #Add newly calculated eigenvectors into bigger array
+            Eigenvecs = np.hstack((Eigenvecs,np.zeros((2**LNew,1))))    #Separate eigenvectors of different exact calculations
         Name = 'Heisensav\Valsqr.txt'
-        np.savetxt(Name,Eigenvals,fmt='%1.5f',delimiter='   ')
+        np.savetxt(Name,Eigenvals,fmt='%1.5f',delimiter='   ')      # Save eigenvalues
         Namev = 'Heisensav\Vecsqr.txt'
-        np.savetxt(Namev,Eigenvecs,fmt='%1.5f',delimiter='   ')
+        np.savetxt(Namev,Eigenvecs,fmt='%1.5f',delimiter='   ')     # Save eigenvectors
     except MemoryError:
         print('The matrix you tried to build requires too much memory space.')
         return
@@ -272,10 +272,10 @@ def ExpandSparseMint(LNew,steps,substeps,llim,rlim):
     except MemoryError:
         print('Matrix is too large.')
         return
-    HNew2 = HNew + (llim-B)*Hb
+    HNew2 = HNew + (llim-B)*Hb          #Hamiltonian for exact calculations
     SubB = B/(substeps+1)
-    HNew3 = HNew + (llim-SubB)*Hb
-    intt = 11
+    HNew3 = HNew + (llim-SubB)*Hb       #Hamiltonian that will be used for interpolation steps
+    intt = 11                           #How many eigenvectors do we calculate at each exact point
     try:
         for k in range(steps+1):
             HNew2 = HNew2 + B*Hb
@@ -289,21 +289,21 @@ def ExpandSparseMint(LNew,steps,substeps,llim,rlim):
         for s in range(steps):
             ii = s+1
             jj = s+2
-            V1 = Eigenvecs[:,(ii+(ii-1)*intt):(ii-1+ii*intt)];
-            V2 = Eigenvecs[:,(jj+(jj-1)*intt):(jj-1+jj*intt)];
-            HNew3 = HNew3 + SubB*Hb
+            V1 = Eigenvecs[:,(ii+(ii-1)*intt):(ii-1+ii*intt)];  #Eigenvectors of left point
+            V2 = Eigenvecs[:,(jj+(jj-1)*intt):(jj-1+jj*intt)];  #Eigenvectors of right point
+            HNew3 = HNew3 + SubB*Hb                             #Generate Hamiltonian with correct magneticfield
             gc.collect()
             for l in range(substeps):
                 HNew3 = HNew3 + SubB*Hb
-                A = np.hstack((V1,V2))
-                Q,R = np.linalg.qr(A,mode='reduced')
-                W2 = ssp.csr_matrix(Q)
-                W1 = W2.transpose()
-                W = W1*HNew3*W2
-                n = ssl.eigsh(W,10,which = 'SA',return_eigenvectors = False)
+                A = np.hstack((V1,V2))                          #Stack eigenvectors of two points
+                Q,R = np.linalg.qr(A,mode='reduced')            #Make orthogonal basis using QR decomposition
+                W2 = ssp.csr_matrix(Q)                          #Write to sparse
+                W1 = W2.transpose()                             
+                W = W1*HNew3*W2                                 #Create new matrix
+                n = ssl.eigsh(W,10,which = 'SA',return_eigenvectors = False)    #Calculate interpolated eigenvalues
                 n = np.sort(n)
                 for p in range(10):
-                    Eigenvals[(s*substeps)+l+s+1,p] = n[p]
+                    Eigenvals[(s*substeps)+l+s+1,p] = n[p]      #Place interpolated eigenvalues into array
         Name = 'Heisensav\Valsint122.txt'
         np.savetxt(Name,Eigenvals,fmt='%1.5f',delimiter='   ')
         Namev = 'Heisensav\Vecsint.txt'
