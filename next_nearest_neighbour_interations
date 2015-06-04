@@ -1,9 +1,13 @@
+# Builder for the Hamiltonian using next-nearest or next-next-nearest neighbour interaction
+# Created by R.J. Slooter (c) 2015
+# Student at Delft University of Technology
+
+# Please note that this code was written in python 3.4, some component will not work with ealier versions of python
+
 import numpy as np
 import scipy
 import scipy.sparse as ssp
 import scipy.sparse.linalg as ssl
-from matplotlib import pylab as plt
-import timeit
 
 MS = 2
 Jx = 4
