@@ -1,0 +1,148 @@
+import numpy as np
+import scipy
+import scipy.sparse as ssp
+import scipy.sparse.linalg as ssl
+from matplotlib import pylab as plt
+import timeit
+
+MS = 2
+Jx = 4
+Jz = Jx/8
+
+Sigx = ssp.csr_matrix([[0.0,0.0,0.0,0.25],[0.0,0.0,0.25,0.0],[0.0,0.25,0.0,0.0],[0.25,0.0,0.0,0.0]])
+Sigy = ssp.csr_matrix([[0.0,0.0,0.0,-0.25],[0.0,0.0,0.25,0.0],[0.0,0.25,0.0,0.0],[-0.25,0.0,0.0,0.0]])
+Sigz = ssp.csr_matrix([[0.5,0.0],[0.0,-0.5]])
+SigP = ssp.csr_matrix([[0.0,1.0],[0.0,0.0]])
+SigM = ssp.csr_matrix([[0.0,0.0],[1.0,0.0]])
+Id = ssp.csr_matrix(np.identity(MS))
+
+H2 = 0.5*Jx*(ssp.kron(SigP,SigM,format='csr')+ssp.kron(SigM,SigP,format='csr'))+Jz*ssp.kron(Sigz,Sigz,format='csr')
+H2n = 0.5*Jx*(ssp.kron(ssp.kron(SigP,Id,format='csr'),SigM,format='csr')+ssp.kron(ssp.kron(SigM,Id,format='csr'),SigP,format='csr'))+Jz*ssp.kron(ssp.kron(Sigz,Id,format='csr'),Sigz,format='csr')
+
+#LNew: Length of the new chain.
+def ExpandSparseNNN(LNew):
+    SpId = ssp.csr_matrix(np.identity(MS))
+    Sz = MS**LNew
+    HNew = ssp.csr_matrix((Sz,Sz))
+    Bulk = dict()
+    Bulk2 = dict()
+    for i in range(LNew-1):
+        for j in range(LNew-1):
+            if i == j:
+                Bulk[(i,j)]=H2
+            else:
+                Bulk[(i,j)]=SpId
+    Ha = ssp.csr_matrix((8,8))
+    for i in range(LNew-2):
+        for j in range(LNew-2):
+            if i == j:
+                Bulk2[(i,j)]=H2n
+            else:
+                Bulk2[(i,j)]=SpId
+    Hb = ssp.csr_matrix((16,16))
+    try:
+        for i in range(LNew-1):
+            for j in range(LNew-2):
+                if j < 1:
+                    Ha = ssp.kron(Bulk[(i,j)],Bulk[(i,j+1)],format='csr')
+                else:
+                    Ha = ssp.kron(Ha,Bulk[(i,j+1)],format='csr')
+            HNew = HNew + Ha
+        if LNew > 3:
+            for i in range(LNew-2):
+                for j in range(LNew-3):
+                    if j < 1:
+                        Hb = ssp.kron(Bulk2[(i,j)],Bulk2[(i,j+1)],format='csr')
+                    else:
+                        Hb = ssp.kron(Hb,Bulk2[(i,j+1)],format='csr')
+                HNew = HNew + Hb
+        else:
+            Hb = ssp.csr_matrix(Bulk2[(0,0)])
+            HNew = HNew + Hb
+    except MemoryError:
+        print('The matrix you tried to build requires too much memory space.')
+        return
+    return HNew
+
+#Data: Matrix you want to save. L: length of the chain.
+#WARNING: raises a TypeError
+def SaveSparse(Data,L):
+    try:
+        Filename = 'Heisensav\HMat{0}'.format(L)+'NSnnn'
+        np.savez(Filename,dat = Data.data, ind = Data.indices, ptr = Data.indptr,fmt='%1.3f',delimiter='  ',newline='\n')
+        print('Data is saved.')
+    except TypeError:
+        raise
+    return
+
+def LoadSparse(L):
+    try:
+        loader = np.load('Heisensav\HMat{0}'.format(L)+'NSnnn.npz')
+        return scipy.sparse.csr_matrix((loader['dat'],loader['ind'],loader['ptr']),shape=(MS**L,MS**L))
+    except FileNotFoundError:
+        print('This matrixfile does not exist.')
+        return
+  
+H2nn = 0.5*Jx*(ssp.kron(ssp.kron(ssp.kron(SigP,Id,format='csr'),Id,format='csr'),SigM,format='csr')+ssp.kron(ssp.kron(ssp.kron(SigM,Id,format='csr'),Id,format='csr'),SigP,format='csr'))+Jz*ssp.kron(ssp.kron(ssp.kron(Sigz,Id,format='csr'),Id,format='csr'),Sigz,format='csr')
+
+#LNew: Length of the new chain.
+def ExpandSparseNNNN(LNew):
+    SpId = ssp.csr_matrix(np.identity(MS))
+    Sz = MS**LNew
+    HNew = ssp.csr_matrix((Sz,Sz))
+    Bulk = dict()
+    Bulk2 = dict()
+    Bulk3 = dict()
+    for i in range(LNew-1):
+        for j in range(LNew-1):
+            if i == j:
+                Bulk[(i,j)]=H2
+            else:
+                Bulk[(i,j)]=SpId
+    Ha = ssp.csr_matrix((8,8))
+    for i in range(LNew-2):
+        for j in range(LNew-2):
+            if i == j:
+                Bulk2[(i,j)]=H2n
+            else:
+                Bulk2[(i,j)]=SpId
+    Hb = ssp.csr_matrix((16,16))
+    for i in range(LNew-3):
+        for j in range(LNew-3):
+            if i == j:
+                Bulk3[(i,j)]=H2nn
+            else:
+                Bulk3[(i,j)]=SpId
+    Hc = ssp.csr_matrix((32,32))
+    try:
+        for i in range(LNew-1):
+            for j in range(LNew-2):
+                if j < 1:
+                    Ha = ssp.kron(Bulk[(i,j)],Bulk[(i,j+1)],format='csr')
+                else:
+                    Ha = ssp.kron(Ha,Bulk[(i,j+1)],format='csr')
+            HNew = HNew + Ha
+        for i in range(LNew-2):
+            for j in range(LNew-3):
+                if j < 1:
+                    Hb = ssp.kron(Bulk2[(i,j)],Bulk2[(i,j+1)],format='csr')
+                else:
+                    Hb = ssp.kron(Hb,Bulk2[(i,j+1)],format='csr')
+            HNew = HNew + Hb
+        if LNew > 4:
+            for i in range(LNew-3):
+                for j in range(LNew-4):
+                    if j < 1:
+                        Hc = ssp.kron(Bulk3[(i,j)],Bulk3[(i,j+1)],format='csr')
+                    else:
+                        Hc = ssp.kron(Hc,Bulk3[(i,j+1)],format='csr')
+                HNew = HNew + Hc
+        elif LNew == 4:
+            Hc = ssp.csr_matrix(Bulk3[(0,0)])
+            HNew = HNew + Hc
+        else:
+            HNew = HNew
+    except MemoryError:
+        print('The matrix you tried to build requires too much memory space.')
+        return
+    return HNew
