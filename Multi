@@ -1,4 +1,8 @@
-import XXZimproved2 as xxz
+# Calculator for eigenvalues of the Hamiltonian of a quantum spin chain, using multiprocessing
+# Created by R.J. Slooter (c) 2015
+# Student at Delft University of Technology
+
+import SparseMethods as xxz
 import scipy.sparse.linalg.eigen.arpack.arpack as ssleaa
 import scipy.sparse as ssp
 import multiprocessing as mp
@@ -6,37 +10,41 @@ import numpy as np
 import gc
 import math
 
-LNewM = 22
-steps = 251
-llim = 0
-rlim = 6
-MS = 2
-num = 10
+# Set conditions for our chain, and magnetic field strength interval.
+LNewM = 22	# Chain length in atoms
+steps = 251	# Number of calculation steps
+llim = 0	# Lower limit magnetic field strength
+rlim = 6	# Upper limit magnetic field strength
+MS = 2		# Spin states of the sytem
+num = 10	# Amount of eigenvalues to calculate
 
-Jx = 4
-Jz = Jx/float(8)
+Jx = 4			# Coupling constant for x and y direction
+Jz = Jx/float(8)	# Coupling constant for z direction
 
-#proc shouldnt exceed 20! 
+# proc should not exceed the amount of CPUs on the used node as this program will not allow
+# the use of multiple nodes.
 proc = 20
 
-Sigx = ssp.csr_matrix([[0.0,1.0],[1.0,0.0]])
-Sigz = ssp.csr_matrix([[1.0,0.0],[0.0,-1.0]])
+Sigx = ssp.csr_matrix([[0.0,1.0],[1.0,0.0]])		# Pauli spin matrix x
+Sigz = ssp.csr_matrix([[1.0,0.0],[0.0,-1.0]])    	# Pauli spin matrix z
 
-Sigz2 = ssp.csr_matrix([[0.25,0.0,0.0,0.0],[0.0,-0.25,0.0,0.0],[0.0,0.0,-0.25,0.0],[0.0,0.0,0.0,0.25]])
-SigP = ssp.csr_matrix([[0.0,1.0],[0.0,0.0]])
-SigM = ssp.csr_matrix([[0.0,0.0],[1.0,0.0]])
+Sigz2 = ssp.csr_matrix([[0.25,0.0,0.0,0.0],[0.0,-0.25,0.0,0.0],[0.0,0.0,-0.25,0.0],[0.0,0.0,0.0,0.25]]) # Two atom z matrix
+SigP = ssp.csr_matrix([[0.0,1.0],[0.0,0.0]])		# Ladder operator +
+SigM = ssp.csr_matrix([[0.0,0.0],[1.0,0.0]])		# Ladder operator -
 
-H2 = 0.5*Jx*(ssp.kron(SigP,SigM,format='csr')+ssp.kron(SigM,SigP,format='csr'))+Jz*Sigz2
+H2 = 0.5*Jx*(ssp.kron(SigP,SigM,format='csr')+ssp.kron(SigM,SigP,format='csr'))+Jz*Sigz2	# Hamiltonian for two atom chain
 
-Hb = xxz.ExpandSparseMh(LNewM) 
-HNew = xxz.ExpandSparseNew(LNewM)
-B = (rlim-llim)/float(steps-1) 
+Hb = xxz.ExpandSparseMh(LNewM) 		# Magnetic field operator for this chain	
+HNew = xxz.ExpandSparseNew(LNewM)	# Hamiltonian for the chain without magnetic field
+B = (rlim-llim)/float(steps-1) 		# Difference in magnetic field strength per step
 
-spw = math.ceil((steps)/float(proc))
+spw = math.ceil((steps)/float(proc))	# Steps per worker (per CPU)
 
-Eigenvals = np.zeros(shape=((spw*proc),num))
-HNew = HNew + (llim-B)*Hb
+Eigenvals = np.zeros(shape=((spw*proc),num))	# Storage place for eigenvalues
+HNew = HNew + (llim-B)*Hb			# Starting Hamiltonian
 
+# A calculator loosely based on the calculators from SparseMethods
+# Here each worker gets assigned its task
 def MultiM(s):
     H = HNew
     H = H + s*spw*B*Hb
@@ -49,6 +57,8 @@ def MultiM(s):
             Eigenvals[k+(s*spw),j] = w[j]
     return Eigenvals
 
+# The workers are set up, when they are done the outcomes are added into a single array containing the final
+# eigenvalue results. The results are stored in a .txt file
 a = timeit.default_timer()
 if __name__ == '__main__':
         pool = mp.Pool(processes = proc)
