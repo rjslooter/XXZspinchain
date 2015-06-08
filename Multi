@@ -1,0 +1,62 @@
+import XXZimproved2 as xxz
+import scipy.sparse.linalg.eigen.arpack.arpack as ssleaa
+import scipy.sparse as ssp
+import multiprocessing as mp
+import numpy as np
+import gc
+import math
+
+LNewM = 22
+steps = 251
+llim = 0
+rlim = 6
+MS = 2
+num = 10
+
+Jx = 4
+Jz = Jx/float(8)
+
+#proc shouldnt exceed 20! 
+proc = 20
+
+Sigx = ssp.csr_matrix([[0.0,1.0],[1.0,0.0]])
+Sigz = ssp.csr_matrix([[1.0,0.0],[0.0,-1.0]])
+
+Sigz2 = ssp.csr_matrix([[0.25,0.0,0.0,0.0],[0.0,-0.25,0.0,0.0],[0.0,0.0,-0.25,0.0],[0.0,0.0,0.0,0.25]])
+SigP = ssp.csr_matrix([[0.0,1.0],[0.0,0.0]])
+SigM = ssp.csr_matrix([[0.0,0.0],[1.0,0.0]])
+
+H2 = 0.5*Jx*(ssp.kron(SigP,SigM,format='csr')+ssp.kron(SigM,SigP,format='csr'))+Jz*Sigz2
+
+Hb = xxz.ExpandSparseMh(LNewM) 
+HNew = xxz.ExpandSparseNew(LNewM)
+B = (rlim-llim)/float(steps-1) 
+
+spw = math.ceil((steps)/float(proc))
+
+Eigenvals = np.zeros(shape=((spw*proc),num))
+HNew = HNew + (llim-B)*Hb
+
+def MultiM(s):
+    H = HNew
+    H = H + s*spw*B*Hb
+    for k in range(spw):
+	H = H + B*Hb
+        w,v = ssleaa.eigen_symmetric(H,num,which = 'SA')
+        gc.collect()
+        w = np.sort(w)
+	for j in range(num):
+            Eigenvals[k+(s*spw),j] = w[j]
+    return Eigenvals
+
+a = timeit.default_timer()
+if __name__ == '__main__':
+        pool = mp.Pool(processes = proc)
+        B = pool.map(MultiM,range(proc))
+        A = B[(0)]
+        for i in range(1,proc):
+            A = A+B[(i)]
+        Name = 'Heisensav/Multi22check.txt'
+        np.savetxt(Name,A,fmt='%1.5f',delimiter='   ')
+b = timeit.default_timer()
+print(b-a)
